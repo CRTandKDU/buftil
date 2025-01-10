@@ -1,0 +1,23 @@
+* DICT
+** DUP primitive
+(let ((x (pop))) (push x) (push x))
+
+** SEMI primitive
+(let ((ret (pop "CALL"))) (set-wordreg ret))
+
+** COLON primitive
+nil
+
+** 2DUP secondary
+COLON
+DUP
+DUP
+SEMI
+
+** FIVE secondary
+COLON
+5
+2DUP
+SEMI
+
+
