@@ -1,23 +1,64 @@
 * DICT
+# Stack operations
 ** DUP primitive
 (let ((x (pop))) (push x) (push x))
+
+** DROP primitive
+(pop)
+
+** SWAP primitive
+(let ((x (pop)) (y (pop))) (push x) (push y))
+
+** OVER primitive
+(let ((x (pop)) (y (pop))) (push y) (push x) (push y))
+
+** RROT primitive
+(let ((a (pop)) (b (pop)) (c (pop))) (push b) (push a) (push c))
+
+** LROT primitive
+(let ((a (pop)) (b (pop)) (c (pop))) (push a) (push c) (push b))
+
+# Arithmetics
+** ADD primitive
+(let ((x (pop)) (y (pop))) (push (+ (string-to-number x) (string-to-number y))))
+
+** SUB primitive
+(let ((x (pop)) (y (pop))) (push (- (string-to-number y) (string-to-number x))))
+
+** MUL primitive
+(let ((x (pop)) (y (pop))) (push (* (string-to-number x) (string-to-number y))))
+
+** DIV primitive
+(let ((x (pop)) (y (pop))) (push (/ (string-to-number y) (string-to-number x))))
+
+# TIL implementation
+** ; primitive immediate
+(create-footer)
 
 ** SEMI primitive
 (let ((ret (pop "CALL"))) (set-wordreg ret))
 
+** : primitive
+(create-header)
+(buftil--set-variable "MODE" "COMPILE")
+
 ** COLON primitive
 nil
+
+** SQUARE secondary
+COLON
+DUP
+MUL
+SEMI
+
+** DOUBLE secondary
+COLON
+DUP
+ADD
+SEMI
 
 ** 2DUP secondary
 COLON
 DUP
 DUP
-SEMI
-
-** FIVE secondary
-COLON
-5
-2DUP
-SEMI
-
-
+* END
