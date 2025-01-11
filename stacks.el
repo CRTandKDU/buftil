@@ -79,9 +79,24 @@
       )
     ))
   
+(defun create-line-number ()
+  (let ((lineno nil))
+    (with-current-buffer (get-buffer-create "dict")
+    ;; This is called by a primitive code in dictionary: keep calling line
+    (let ((keep-data (line-number-at-pos)))
+      (goto-char (point-min))
+      (if (search-forward-regexp "* END\n" nil t)
+	  (setq lineno (1- (line-number-at-pos))))
+      (goto-line keep-data)
+      )
+    (debug lineno)
+    lineno
+    )
+    ))
 
 ;; Interpreters: inner
 (defun next ()
+  
   (let ((cur (string-to-number (get-wordreg))))
     (set-wordreg (1+ cur))
     (with-current-buffer (get-buffer-create "dict")
@@ -91,53 +106,60 @@
     )
   )
 
+(defun execute (word wtype wmode)
+  (cond
+   ;; Primitive in underlying language, emacs-lisp
+   ((string= wtype "primitive")
+    (while (not (string= "\n" (thing-at-point 'line t)))
+      (let ((instr (string-trim-right (thing-at-point 'line t))))
+	;; (with-current-buffer (get-buffer-create "*EXECTRACE*")
+	;;   (insert (format "> %s\n" instr))
+	;;   )
+	(eval (car (read-from-string instr)))
+	)
+      (forward-line)
+      ))
+   ;; Secondary: consecutive words, one per line
+   ((string= wtype "secondary")
+    (push (get-wordreg) "CALL")
+    (set-wordreg (line-number-at-pos)))
+   ))
+
 (defun goto (word)
   (with-current-buffer (get-buffer-create "dict")
     (goto-char (point-min))
     (if (search-forward-regexp
-	 (format "^** %s \\([[:word:]]+\\)\\([[:word:]]+\\)?\n" word) nil t)
+	 (format "^** %s \\([[:word:]]+\\)\\( [[:word:]]+\\)?\n" word) nil t)
 	(let ((wtype (match-string 1))
 	      (wmode (match-string 2))
 	      (mode (buftil--get-variable "MODE")))
 	  (set-text-properties 0 (length wtype) nil wtype)
 	  (set-text-properties 0 (length wmode) nil wmode)
-	  ;; Mode check
-	  (when (and (string= "COMPILE" mode)
-		     (string= "immediate" wmode))
-	    (buftil--set-variable "MODE" "EXECUTION")
-	    (setq mode "EXECUTION"))
 	  ;;
 	  (cond
-	   ;; In EXECUTION mode a primitive is a PROGN of consecutive elisp lines>
-	   ((and (string= "EXECUTION" mode)
-		 (string= wtype "primitive"))
-	    (while (not (string= "\n" (thing-at-point 'line t)))
-	      (let ((instr (string-trim-right (thing-at-point 'line t))))
-		;; (with-current-buffer (get-buffer-create "*EXECTRACE*")
-		;;   (insert (format "> %s\n" instr))
-		;;   )
-		(eval (car (read-from-string instr)))
-		)
-	      (forward-line)
-	      )
-	    )
-	   ;; In EXECUTION mode a secondary is a list of consecutive word, one per line.
-	   ((and (string= "EXECUTION" mode)
-		 (string= wtype "secondary"))
-	    (push (get-wordreg) "CALL")
-	    (set-wordreg (line-number-at-pos))
-	    )
-	   ;; In COMPILE mode lines are added at the end of dictionary.
+	   ((string= "EXECUTION" mode)
+	    (execute word wtype wmode))
+	   ;;
 	   ((string= "COMPILE" mode)
-	    (create-body word)
-	    )
+	    (if (string= " immediate" wmode)
+		(execute word wtype wmode)
+	      (create-body word)))
 	   ;;
 	   (t nil)
 	   )
 	  wtype)
-      ;; Not a word, push as a constant onto stack
-      (let ((res nil))
-	(push word)
+      ;; Not a word
+      (let ((res nil)
+	    (mode (buftil--get-variable "MODE")))
+	(cond
+	   ((string= "EXECUTION" mode)
+	    (push word))
+	   ;;
+	   ((string= "COMPILE" mode)
+	    (create-body word))
+	   ;;
+	   (t nil)
+	   )
 	res))
     )
   )

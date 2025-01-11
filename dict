@@ -18,6 +18,12 @@
 ** LROT primitive
 (let ((a (pop)) (b (pop)) (c (pop))) (push a) (push c) (push b))
 
+** <R primitive
+(push (pop) "CALL")
+
+** >R primitive
+(push (pop "CALL"))
+
 # Arithmetics
 ** ADD primitive
 (let ((x (pop)) (y (pop))) (push (+ (string-to-number x) (string-to-number y))))
@@ -34,6 +40,7 @@
 # TIL implementation
 ** ; primitive immediate
 (create-footer)
+(buftil--set-variable "MODE" "EXECUTION")
 
 ** SEMI primitive
 (let ((ret (pop "CALL"))) (set-wordreg ret))
@@ -44,6 +51,16 @@
 
 ** COLON primitive
 nil
+
+** BEGIN primitive immediate
+(push (create-line-number) "CALL")
+
+** END primitive immediate
+(create-body "<END>")
+(create-body (format "%s" (pop "CALL")))
+
+** <END> primitive
+(if (= 0 (string-to-number (pop))) (let ((lineno (line-number-at-pos))) (forward-line) (set-wordreg (thing-at-point 'line t))) (set-wordreg (+ 2 (line-number-at-pos))))
 
 ** SQUARE secondary
 COLON
@@ -57,8 +74,15 @@ DUP
 ADD
 SEMI
 
-** 2DUP secondary
+
+** foo secondary
 COLON
+2
+1
+SUB
 DUP
-DUP
+<END>
+81
+SEMI
+
 * END
