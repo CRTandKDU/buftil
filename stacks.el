@@ -1,6 +1,7 @@
 ;;; stacks.el -- Implementing stacks in text buffers
 ;;  Inspired by [[https://nicholas.carlini.com/writing/2025/regex-chess.html]]. Here, stacks buffers are in org-mode.
 
+;; Stack operations
 (defun push (str &optional stack)
   (let ((stack-regexp
 	 (format "* %s\n" (or stack "STACK"))))
@@ -23,7 +24,7 @@
       (goto-char (point-min))
       (if (search-forward-regexp
 	   (concat stack-regexp
-		   "\\([[:word:]]+\\)\n")
+		   "\\([-[:word:]]+\\)\n")
 	   nil
 	   t)
 	  (let ((str (match-string 1)))
@@ -34,6 +35,7 @@
     )
   )
 
+;; System variables operations
 (defun buftil--get-variable (var &optional buf)
   (with-current-buffer (get-buffer (or buf "test"))
     (goto-char (point-min))
@@ -51,9 +53,34 @@
     )
   )
 
+;; Word Register operations
 (defun get-wordreg (&optional buf) (buftil--get-variable "WORDREG" buf))
 (defun set-wordreg (mark &optional buf) (buftil--set-variable "WORDREG" mark buf))
 
+(defun jump-relative-if-zero-wordreg ()
+  ;; This is called from the dictionary buffer
+  (save-excursion
+    (goto-line (string-to-number (get-wordreg)))
+    (let ((delta (if (= 0 (string-to-number (pop)))
+		     (string-to-number (thing-at-point 'line t))
+		   1)))
+      ;; (debug (+ delta (line-number-at-pos)))
+      (set-wordreg (+ delta (line-number-at-pos))))
+    )
+  )
+
+(defun jump-relative-not-zero-wordreg ()
+  ;; This is called from the dictionary buffer
+  (save-excursion
+    (goto-line (string-to-number (get-wordreg)))
+    (let ((delta (if (= 0 (string-to-number (pop)))
+		     1
+		   (string-to-number (thing-at-point 'line t)))))
+      (set-wordreg (+ delta (line-number-at-pos))))
+    )
+  )
+
+;; Dictionary operations
 (defun create-header ()
   (with-current-buffer (get-buffer-create "dict")
     ;; This is called by a primitive code in dictionary: keep calling line
@@ -78,6 +105,31 @@
       (goto-line keep-data)
       )
     ))
+
+(defun create-body-code ()
+  ;; (let ((word (instr-pop))) (create-body word)))
+  (let ((keep-data (line-number-at-pos))
+	(lineno (string-to-number (get-wordreg)))
+	)
+    (goto-line lineno)
+    (create-body (car (split-string-and-unquote (thing-at-point 'line t))))
+    (set-wordreg (1+ lineno))
+    (goto-line keep-data)))
+
+
+(defun create-body--stack (s)
+  (let ((scalar (pop s))) (create-body scalar)))
+
+(defun create-body-stack () (create-body--stack "STACK"))
+(defun create-body-call () (create-body--stack "CALL"))
+
+(defun update-body (there here)
+  ;; This is called from the dictionary buffer
+  (save-excursion
+    (let ((delta (- here (string-to-number there))))
+      (goto-line (string-to-number there))
+      (kill-whole-line)
+      (insert (format "%s\n" delta)))))
   
 (defun create-line-number ()
   (let ((lineno nil))
@@ -89,18 +141,21 @@
 	  (setq lineno (1- (line-number-at-pos))))
       (goto-line keep-data)
       )
-    (debug lineno)
     lineno
     )
     ))
 
 ;; Interpreters: inner
 (defun next ()
-  
   (let ((cur (string-to-number (get-wordreg))))
     (set-wordreg (1+ cur))
     (with-current-buffer (get-buffer-create "dict")
       (goto-line cur)
+      ;;
+      ;; (read-string (format "%s : %s (Press RETURN)"
+      ;; 			   cur
+      ;; 			   (string-trim-right (thing-at-point 'line t))))
+      ;;
       (goto (string-trim-right (thing-at-point 'line t)))
       )
     )

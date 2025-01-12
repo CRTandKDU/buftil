@@ -38,6 +38,15 @@
 (let ((x (pop)) (y (pop))) (push (/ (string-to-number y) (string-to-number x))))
 
 # TIL implementation
+** = primitive
+(if (string= (pop) (pop)) (push 1) (push 0)) 
+
+** < primitive
+(if (< (string-to-number (pop)) (string-to-number (pop))) (push 1) (push 0))
+
+** > primitive
+(if (> (string-to-number (pop)) (string-to-number (pop))) (push 1) (push 0))
+
 ** ; primitive immediate
 (create-footer)
 (buftil--set-variable "MODE" "EXECUTION")
@@ -49,6 +58,9 @@
 (create-header)
 (buftil--set-variable "MODE" "COMPILE")
 
+** CREATE primitive
+(create-header)
+
 ** COLON primitive
 nil
 
@@ -56,11 +68,31 @@ nil
 (push (create-line-number) "CALL")
 
 ** END primitive immediate
-(create-body "<END>")
-(create-body (format "%s" (pop "CALL")))
+(create-body "<JNZ>")
+(create-body (format "%s" (- (string-to-number (pop "CALL")) (create-line-number))))
 
-** <END> primitive
-(if (= 0 (string-to-number (pop))) (let ((lineno (line-number-at-pos))) (forward-line) (set-wordreg (thing-at-point 'line t))) (set-wordreg (+ 2 (line-number-at-pos))))
+** <JNZ> primitive
+(jump-relative-not-zero-wordreg)
+
+** <JZ> primitive
+(jump-relative-if-zero-wordreg)
+
+** IF primitive immediate
+(create-body "<JZ>")
+(push (create-line-number) "CALL")
+(create-body "")
+
+** THEN primitive immediate
+(update-body (pop "CALL") (create-line-number))
+
+** CODE primitive
+(create-body-code)
+
+** CODESTACK primitive
+(create-body-stack)
+
+** CODECALL primitive
+(create-body-call)
 
 ** SQUARE secondary
 COLON
@@ -74,15 +106,45 @@ DUP
 ADD
 SEMI
 
-
 ** foo secondary
 COLON
-2
+10
+DUP
 1
 SUB
 DUP
-<END>
-81
+<JZ>
+-5
+SEMI
+
+** bar secondary
+COLON
+<JZ>
+2
+"OK"
+"FOLLOW"
+SEMI
+
+** quux secondary
+COLON
+DUP
+ADD
+SEMI
+
+
+# : CONSTANT CREATE CODESTACK CODE "SEMI\\n" ;
+** CONSTANT secondary
+COLON
+CREATE
+CODESTACK
+CODE
+"SEMI\n"
+SEMI
+
+# 10 CONSTANT DIX
+** DIX secondary
+COLON
+10
 SEMI
 
 * END
