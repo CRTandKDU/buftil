@@ -1,8 +1,8 @@
 ;;; stacks.el -- Implementing stacks in text buffers
 ;;  Inspired by [[https://nicholas.carlini.com/writing/2025/regex-chess.html]]. Here, stacks buffers are in org-mode.
 
-;; Stack operations
-(defun push (str &optional stack)
+;; Generic stack operations
+(defun buftil-push (str &optional stack)
   (let ((stack-regexp
 	 (format "* %s\n" (or stack "STACK"))))
     (with-current-buffer (get-buffer "test")
@@ -17,7 +17,7 @@
     )
   )
 
-(defun pop (&optional stack)
+(defun buftil-pop (&optional stack)
   (let ((stack-regexp
 	 (format "* %s\n" (or stack "STACK"))))
     (with-current-buffer (get-buffer "test")
@@ -34,6 +34,18 @@
       )
     )
   )
+
+(defun buftil--up-push (str &optional stack)
+  (let ((rx (format "* %s\n" (or stack "END"))))
+    (goto-char (point-min))
+    (if (search-forward-regexp rx nil t)
+	(replace-match (format "%s%s" str rx) t))))
+
+(defun buftil--up-update (line-string val)
+  (goto-line (string-to-number line-string))
+  (kill-whole-line)
+  (insert (format "%s\n" val)))
+  
 
 ;; System variables operations
 (defun buftil--get-variable (var &optional buf)
@@ -53,91 +65,87 @@
     )
   )
 
-;; Word Register operations
-(defun get-wordreg (&optional buf) (buftil--get-variable "WORDREG" buf))
-(defun set-wordreg (mark &optional buf) (buftil--set-variable "WORDREG" mark buf))
+;; Aliases for Word Register operations
+(defun buftil-get-wordreg (&optional buf) (buftil--get-variable "WORDREG" buf))
+(defun buftil-set-wordreg (mark &optional buf) (buftil--set-variable "WORDREG" mark buf))
 
-(defun jump-relative-if-zero-wordreg ()
+;; Conditional jump operations
+(defun buftil-jump-relative-if-zero-wordreg ()
   ;; This is called from the dictionary buffer
   (save-excursion
-    (goto-line (string-to-number (get-wordreg)))
-    (let ((delta (if (= 0 (string-to-number (pop)))
+    (goto-line (string-to-number (buftil-get-wordreg)))
+    (let ((delta (if (= 0 (string-to-number (buftil-pop)))
 		     (string-to-number (thing-at-point 'line t))
 		   1)))
       ;; (debug (+ delta (line-number-at-pos)))
-      (set-wordreg (+ delta (line-number-at-pos))))
+      (buftil-set-wordreg (+ delta (line-number-at-pos))))
     )
   )
 
-(defun jump-relative-not-zero-wordreg ()
+(defun buftil-jump-relative-not-zero-wordreg ()
   ;; This is called from the dictionary buffer
   (save-excursion
-    (goto-line (string-to-number (get-wordreg)))
-    (let ((delta (if (= 0 (string-to-number (pop)))
+    (goto-line (string-to-number (buftil-get-wordreg)))
+    (let ((delta (if (= 0 (string-to-number (buftil-pop)))
 		     1
 		   (string-to-number (thing-at-point 'line t)))))
-      (set-wordreg (+ delta (line-number-at-pos))))
+      (buftil-set-wordreg (+ delta (line-number-at-pos))))
     )
   )
 
 ;; Dictionary operations
-(defun create-header ()
-  (with-current-buffer (get-buffer-create "dict")
+(defun buftil-create-header (&optional buf)
+  (with-current-buffer (get-buffer-create (or buf "dict"))
     ;; This is called by a primitive code in dictionary: keep calling line
     (let ((keep-data (line-number-at-pos)))
-      (goto-char (point-min))
-      (if (search-forward-regexp "* END\n" nil t)
-	  (let ((word (instr-pop)))
-	    (replace-match (format "** %s secondary\nCOLON\n* END\n" word) t)))
+      (buftil--up-push (format "** %s secondary\nCOLON\n" (buftil--pop-instr)))
       (goto-line keep-data)
       )
     ))
 
-(defun create-footer () (create-body "SEMI\n"))
+(defun buftil-create-footer () (buftil-create-body "SEMI\n\n"))
 
-(defun create-body (instr)
-  (with-current-buffer (get-buffer-create "dict")
+(defun buftil-create-body (instr &optional buf)
+  (with-current-buffer (get-buffer-create (or buf "dict"))
     ;; This is called by a primitive code in dictionary: keep calling line
     (let ((keep-data (line-number-at-pos)))
-      (goto-char (point-min))
-      (if (search-forward-regexp "* END\n" nil t)
-	  (replace-match (format "%s\n* END\n" instr) t))
+      (buftil--up-push instr)
       (goto-line keep-data)
       )
     ))
 
-(defun create-body-code ()
-  ;; (let ((word (instr-pop))) (create-body word)))
+(defun buftil-create-body-from-code (&optional buf)
+  ;; (let ((word (buftil--pop-instr))) (create-body word)))
   (let ((keep-data (line-number-at-pos))
-	(lineno (string-to-number (get-wordreg)))
+	(lineno (string-to-number (buftil-get-wordreg)))
 	)
     (goto-line lineno)
-    (create-body (car (split-string-and-unquote (thing-at-point 'line t))))
-    (set-wordreg (1+ lineno))
+    (buftil-create-body
+     (format "%s\n" (car (split-string-and-unquote (thing-at-point 'line t)))) buf)
+    (buftil-set-wordreg (1+ lineno))
     (goto-line keep-data)))
 
 
-(defun create-body--stack (s)
-  (let ((scalar (pop s))) (create-body scalar)))
+(defun buftil--create-body-from-stack (s &optional buf)
+  (let ((scalar (buftil-pop s))) (buftil-create-body (format "%s\n" scalar) buf)))
 
-(defun create-body-stack () (create-body--stack "STACK"))
-(defun create-body-call () (create-body--stack "CALL"))
+(defun buftil-create-body-from-stack () (buftil--create-body-from-stack "STACK"))
+(defun buftil-create-body-from-call  () (buftil--create-body-from-stack "CALL"))
 
-(defun update-body (there here)
+(defun buftil-update-body (there here)
   ;; This is called from the dictionary buffer
   (save-excursion
     (let ((delta (- here (string-to-number there))))
-      (goto-line (string-to-number there))
-      (kill-whole-line)
-      (insert (format "%s\n" delta)))))
+      (buftil--up-update there delta)
+      )))
   
-(defun create-line-number ()
+(defun buftil-create-line-number (&optional stack buf)
   (let ((lineno nil))
-    (with-current-buffer (get-buffer-create "dict")
+    (with-current-buffer (get-buffer-create (or buf "dict"))
     ;; This is called by a primitive code in dictionary: keep calling line
     (let ((keep-data (line-number-at-pos)))
       (goto-char (point-min))
-      (if (search-forward-regexp "* END\n" nil t)
+      (if (search-forward-regexp (format "* %s\n" (or stack "END")) nil t)
 	  (setq lineno (1- (line-number-at-pos))))
       (goto-line keep-data)
       )
@@ -146,9 +154,9 @@
     ))
 
 ;; Interpreters: inner
-(defun next ()
-  (let ((cur (string-to-number (get-wordreg))))
-    (set-wordreg (1+ cur))
+(defun buftil--next ()
+  (let ((cur (string-to-number (buftil-get-wordreg))))
+    (buftil-set-wordreg (1+ cur))
     (with-current-buffer (get-buffer-create "dict")
       (goto-line cur)
       ;;
@@ -156,12 +164,12 @@
       ;; 			   cur
       ;; 			   (string-trim-right (thing-at-point 'line t))))
       ;;
-      (goto (string-trim-right (thing-at-point 'line t)))
+      (buftil--find-execute (string-trim-right (thing-at-point 'line t)))
       )
     )
   )
 
-(defun execute (word wtype wmode)
+(defun buftil--execute (word wtype wmode)
   (cond
    ;; Primitive in underlying language, emacs-lisp
    ((string= wtype "primitive")
@@ -176,11 +184,11 @@
       ))
    ;; Secondary: consecutive words, one per line
    ((string= wtype "secondary")
-    (push (get-wordreg) "CALL")
-    (set-wordreg (line-number-at-pos)))
+    (buftil-push (buftil-get-wordreg) "CALL")
+    (buftil-set-wordreg (line-number-at-pos)))
    ))
 
-(defun goto (word)
+(defun buftil--find-execute (word)
   (with-current-buffer (get-buffer-create "dict")
     (goto-char (point-min))
     (if (search-forward-regexp
@@ -193,12 +201,12 @@
 	  ;;
 	  (cond
 	   ((string= "EXECUTION" mode)
-	    (execute word wtype wmode))
+	    (buftil--execute word wtype wmode))
 	   ;;
 	   ((string= "COMPILE" mode)
 	    (if (string= " immediate" wmode)
-		(execute word wtype wmode)
-	      (create-body word)))
+		(buftil--execute word wtype wmode)
+	      (buftil-create-body (format "%s\n" word))))
 	   ;;
 	   (t nil)
 	   )
@@ -208,10 +216,10 @@
 	    (mode (buftil--get-variable "MODE")))
 	(cond
 	   ((string= "EXECUTION" mode)
-	    (push word))
+	    (buftil-push word))
 	   ;;
 	   ((string= "COMPILE" mode)
-	    (create-body word))
+	    (buftil-create-body (format "%s\n" word)))
 	   ;;
 	   (t nil)
 	   )
@@ -222,27 +230,27 @@
 ;; Interpreters: outer
 (defvar buftil-stack-instruction nil "TIL Instruction stack")
 
-(defun instr-pop ()
+(defun buftil--pop-instr ()
   (let ((res (car buftil-stack-instruction)))
     (setq buftil-stack-instruction (cdr buftil-stack-instruction))
     res))
 
-(defun til-outer () 
-  (let ((instr (instr-pop)))
+(defun buftil--outer () 
+  (let ((instr (buftil--pop-instr)))
     (while instr
-      (set-wordreg "OUTER")
-      (goto instr)
-      (while (not (string= "OUTER" (get-wordreg)))
-	(next)
+      (buftil-set-wordreg "OUTER")
+      (buftil--find-execute instr)
+      (while (not (string= "OUTER" (buftil-get-wordreg)))
+	(buftil--next)
 	)
-      (setq instr (instr-pop)))
+      (setq instr (buftil--pop-instr)))
     )
   )
 
-(defun til-repl ()
+(defun buftil-repl ()
   (interactive)
   (let ((inline (read-string "Enter FORTH line: ")))
     (buftil--set-variable "MODE" "EXECUTION")
     (setq buftil-stack-instruction (split-string inline))
-    (til-outer)))
+    (buftil--outer)))
 
