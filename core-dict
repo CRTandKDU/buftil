@@ -97,4 +97,7 @@ nil
 ** CODECALL primitive
 (buftil-create-body-from-call)
 
+** . primitive
+(buftil-pop-print)
+
 * END

@@ -1,11 +1,12 @@
-;;; stacks.el -- Implementing stacks in text buffers
+;;; buftil-stacks.el -- Implementing stacks in text buffers
 ;;  Inspired by [[https://nicholas.carlini.com/writing/2025/regex-chess.html]]. Here, stacks buffers are in org-mode.
 
 ;; Generic stack operations
-(defun buftil-push (str &optional stack)
+(defun buftil-push (str &optional stack buf)
+  "Push string right after an org-mode heading `stack', expanding down."
   (let ((stack-regexp
 	 (format "* %s\n" (or stack "STACK"))))
-    (with-current-buffer (get-buffer "test")
+    (with-current-buffer (get-buffer (or buf "test"))
       (goto-char (point-min))
       (if (search-forward-regexp stack-regexp
 				 nil
@@ -17,16 +18,14 @@
     )
   )
 
-(defun buftil-pop (&optional stack)
+(defun buftil-pop (&optional stack buf)
+  "Pop element right after an org-mode heading `stack', expanding down."
   (let ((stack-regexp
 	 (format "* %s\n" (or stack "STACK"))))
-    (with-current-buffer (get-buffer "test")
+    (with-current-buffer (get-buffer (or buf "test"))
       (goto-char (point-min))
       (if (search-forward-regexp
-	   (concat stack-regexp
-		   "\\([-[:word:]]+\\)\n")
-	   nil
-	   t)
+	   (concat stack-regexp "\\([-[:word:]]+\\)\n") nil t)
 	  (let ((str (match-string 1)))
 	    (replace-match stack-regexp)
 	    str)
@@ -35,19 +34,23 @@
     )
   )
 
-(defun buftil--up-push (str &optional stack)
+(defun buftil--up-push (str &optional stack buf)
+  "Push string right before an org-mode heading `stack' in buffer `buf', expanding up."
   (let ((rx (format "* %s\n" (or stack "END"))))
-    (goto-char (point-min))
-    (if (search-forward-regexp rx nil t)
-	(replace-match (format "%s%s" str rx) t))))
+    (with-current-buffer (or buf "dict")
+      (goto-char (point-min))
+      (if (search-forward-regexp rx nil t)
+	  (replace-match (format "%s%s" str rx) t)))))
 
 (defun buftil--up-update (line-string val)
+  "Replace line with update in a word definition (or in a stack)."
   (goto-line (string-to-number line-string))
   (kill-whole-line)
   (insert (format "%s\n" val)))
   
 
 ;; System variables operations
+;; Variables are usually kept in level 1 org-mode headings
 (defun buftil--get-variable (var &optional buf)
   (with-current-buffer (get-buffer (or buf "test"))
     (goto-char (point-min))
@@ -70,6 +73,7 @@
 (defun buftil-set-wordreg (mark &optional buf) (buftil--set-variable "WORDREG" mark buf))
 
 ;; Conditional jump operations
+;; Conditional jumps, on zero or non-zero top of stack, are relative.
 (defun buftil-jump-relative-if-zero-wordreg ()
   ;; This is called from the dictionary buffer
   (save-excursion
@@ -94,9 +98,13 @@
   )
 
 ;; Dictionary operations
+;; TIL words are represented as level 2 org-mode headings,
+;; with the associated code, emacs lisp or sequence of TIL
+;; words in the content. In the former case, words are
+;; "primitive", in the latter, "secondary".
 (defun buftil-create-header (&optional buf)
   (with-current-buffer (get-buffer-create (or buf "dict"))
-    ;; This is called by a primitive code in dictionary: keep calling line
+    ;; This is called by a primitive code in dictionary: keep calling line number
     (let ((keep-data (line-number-at-pos)))
       (buftil--up-push (format "** %s secondary\nCOLON\n" (buftil--pop-instr)))
       (goto-line keep-data)
@@ -157,6 +165,8 @@
 
 ;; Interpreters: inner
 (defun buftil--next (&optional buf)
+  "Fetch and execute next instruction (primary/secondary).
+Updates PC in variable `WORDREG'."
   (let ((cur (string-to-number (buftil-get-wordreg)))
 	(buf-dict (or buf "dict"))
 	)
@@ -174,6 +184,9 @@
   )
 
 (defun buftil--execute (word wtype wmode)
+  "Executes TIL `word' according to its type `wtype'.
+Called in EXECUTION mode, and in COMPILE mode
+if word is 'immediate'."
   (cond
    ;; Primitive in underlying language, emacs-lisp
    ((string= wtype "primitive")
@@ -192,14 +205,22 @@
     (buftil-set-wordreg (line-number-at-pos)))
    ))
 
+(defun buftil--word-to-rx (word)
+  (if (= 1 (length word))
+      (format "^** \\%s \\([[:word:]]+\\)\\( [[:word:]]+\\)?\n" word)
+    (format "^** %s \\([[:word:]]+\\)\\( [[:word:]]+\\)?\n" word)))
+
 (defun buftil--find-execute (word &optional buf)
+  "Scan dictionary for next word input.
+If found, execute or compile word according to mode.
+If not, push to stack as a string constant."
   (let ((buf-dict (or buf "dict")))
     (with-current-buffer (get-buffer-create buf-dict)
       (goto-char (point-min))
-      (if (search-forward-regexp
-	   (format "^** %s \\([[:word:]]+\\)\\( [[:word:]]+\\)?\n" word) nil t)
-	  (let ((wtype (match-string 1))
-		(wmode (match-string 2))
+      ;; (debug (buftil--word-to-rx word))
+      (if (search-forward-regexp (buftil--word-to-rx word) nil t)
+	  (let ((wtype (match-string 1)) ; primitive or secondary
+		(wmode (match-string 2)) ; immediate or nil
 		(mode (buftil--get-variable "MODE")))
 	    (set-text-properties 0 (length wtype) nil wtype)
 	    (set-text-properties 0 (length wmode) nil wmode)
@@ -216,7 +237,7 @@
 	     (t nil)
 	     )
 	    wtype)
-	;; Not a word
+	;; Not a recognized word
 	(let ((res nil)
 	      (mode (buftil--get-variable "MODE")))
 	  (cond
@@ -232,6 +253,12 @@
       )
     )
   )
+
+;; Primitive IO
+(defun buftil-pop-print (&optional buf)
+  (let ((top (buftil-pop)))
+    (buftil--up-push (format "%s\n" top) "OUTPUT" "test")))
+
 
 ;; Interpreters: outer
 (defvar buftil-stack-instruction nil "TIL Instruction stack")
@@ -260,3 +287,5 @@
     (setq buftil-stack-instruction (split-string inline))
     (buftil--outer)))
 
+;; Feature
+(provide 'buftil-stacks)
